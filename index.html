@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PositionX | 仓位计算器</title>
+
+<!-- PWA Manifest -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#8b7cff">
+
+<style>
+/* ===== 页面基础样式 ===== */
+body{background:#0f1115;color:#fff;font-family:Arial;display:flex;justify-content:center;align-items:center;min-height:100vh;transition:.2s;}
+.card{background:#1c1f26;padding:20px;width:420px;border-radius:14px;transition:.2s;}
+.card.danger{ background:#3a1c1c;}
+label{font-size:.9rem;margin-top:8px;display:block;}
+input,select{width:100%;padding:9px;margin-top:4px;border-radius:6px;border:none;font-size:1rem;}
+.row{display:flex;gap:14px;margin-top:10px;margin-bottom:6px;}
+.wallet-box{flex:0.85;}
+.row > div:not(.wallet-box){flex:1.15;}
+.result{background:#262a33;margin-top:14px;padding:14px;border-radius:10px;font-size:.95rem;line-height:1.55;}
+.green{ color:#22c55e; }
+.red{ color:#ef4444; }
+.yellow{ color:#facc15; }
+.warn{ color:#fbbf24; font-size:.85rem; }
+.small{ font-size:.75rem; color:#9ca3af; }
+.mode{ font-size:.8rem; color:#60a5fa; }
+/* ===== App Header ===== */
+.app-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.app-logo{width:36px;height:36px;border-radius:8px;}
+.app-title .name{font-size:1.15rem;font-weight:700;color:#8b7cff;line-height:1.1;}
+.app-title .sub{font-size:.7rem;color:#9ca3af;}
+</style>
+</head>
+
+<body>
+<div class="card" id="card">
+
+<!-- App Header -->
+<div class="app-header">
+  <img src="logo.png" class="app-logo" alt="PositionX Logo">
+  <div class="app-title">
+    <div class="name">PositionX</div>
+    <div class="sub">Position Size & Risk Calculator</div>
+  </div>
+</div>
+
+<label>交易品种 / Trading Instrument</label>
+<select id="pair">
+  <option value="BTC">BTC / ETH（Bybit · 100x）</option>
+  <option value="XAU">XAUUSD（MT5 · 500x）</option>
+  <option value="XAG">XAGUSD（MT5 · 500x）</option>
+</select>
+
+<div class="row">
+  <div class="wallet-box">
+    <label>账户资金 (USD)<br><span class="small">Account Balance</span></label>
+    <input id="wallet" type="number" value="1000">
+  </div>
+  <div>
+    <label>最大风险 (%)<br><span class="small">Max Risk · <span id="riskText">2%</span></span></label>
+    <input id="risk" type="number" value="2">
+  </div>
+</div>
+
+<label>进场价格 / Entry Price</label>
+<input id="entry" type="number" value="30000">
+<label>止损价格 / Stop Loss</label>
+<input id="stop" type="number" value="29500">
+<label>止盈价格 / Take Profit</label>
+<input id="tp" type="number" value="31000">
+<label>下单手数（填写 = 手动）<br><span class="small">Lot Size (Manual)</span></label>
+<input id="manualLot" type="number" placeholder="例如 / e.g. 0.02">
+
+<div class="result">
+  <div class="mode" id="modeText"></div>
+  <div>杠杆 / Leverage：<span id="leverage"></span>x</div>
+  <div>风险金额 / Risk Amount：$<span id="maxLoss"></span></div>
+  <div>实际亏损 / Loss：<span id="loss" class="red"></span></div>
+  <div>止损距离 / Stop Distance：<span id="stopDist"></span></div>
+  <div>潜在盈利 / Profit：<span id="profit" class="green"></span></div>
+  <div>盈亏比 RR：<span id="rr"></span></div>
+  <div>最终手数 / Final Lot：<span id="finalLot"></span></div>
+  <div>所需保证金 / Margin：$<span id="margin" class="yellow"></span></div>
+  <div id="warning" class="warn"></div>
+</div>
+</div>
+
+<script>
+function roundDown(v, step){return Math.floor(v / step) * step;}
+function calculate(){
+  const pair   = document.getElementById("pair").value;
+  const wallet = Number(document.getElementById("wallet").value);
+  const risk   = Number(document.getElementById("risk").value);
+  const entry  = Number(document.getElementById("entry").value);
+  const stop   = Number(document.getElementById("stop").value);
+  const tp     = Number(document.getElementById("tp").value);
+  const manual = Number(document.getElementById("manualLot").value) || 0;
+
+  document.getElementById("riskText").textContent = risk + "%";
+  if(!wallet || !entry || !stop || entry === stop) return;
+
+  let leverage=100, contract=1, minLot=0.001, step=0.001;
+  if(pair==="XAU"){ leverage=500; contract=100; minLot=0.01; step=0.01; }
+  if(pair==="XAG"){ leverage=500; contract=5000; minLot=0.01; step=0.01; }
+
+  const maxLoss = wallet * risk / 100;
+  const stopDist = Math.abs(entry - stop);
+  const stopPct  = stopDist / entry * 100;
+
+  const useManual = manual > 0;
+
+  let lot = useManual ? roundDown(manual, step) : roundDown(maxLoss / (stopDist * contract), step);
+
+  const loss = lot * stopDist * contract;
+  const lossPct = loss / wallet * 100;
+
+  const profit = tp ? lot * Math.abs(tp - entry) * contract : 0;
+  const profitPct = profit / wallet * 100;
+
+  const margin = lot * entry * contract / leverage;
+  const rr = loss>0 ? (profit/loss).toFixed(2) : "-";
+
+  document.getElementById("modeText").textContent = useManual ? "模式：手动手数（风险仅供参考） / Manual Mode" : "模式：自动风险控制 / Auto Risk";
+  document.getElementById("leverage").textContent = leverage;
+  document.getElementById("maxLoss").textContent = maxLoss.toFixed(2);
+  document.getElementById("loss").textContent = loss.toFixed(2)+" ("+lossPct.toFixed(2)+"%)";
+  document.getElementById("stopDist").textContent = stopDist.toFixed(2)+" ("+stopPct.toFixed(2)+"%)";
+  document.getElementById("profit").textContent = profit.toFixed(2)+" ("+profitPct.toFixed(2)+"%)";
+  document.getElementById("finalLot").textContent = lot.toFixed(4);
+  document.getElementById("margin").textContent = margin.toFixed(2);
+  document.getElementById("rr").textContent = rr;
+
+  const card = document.getElementById("card");
+  const warn = document.getElementById("warning");
+  card.classList.remove("danger");
+  warn.textContent="";
+
+  if(lot < minLot){warn.textContent="最小下单手数 / Min Lot："+minLot;}
+  if(!useManual){if(lossPct > risk){warn.textContent="❌ 实际亏损超过设定风险 / Risk Exceeded";card.classList.add("danger");}else if(margin > wallet){warn.textContent="❌ 保证金超过账户资金 / Insufficient Balance";card.classList.add("danger");}}
+}
+["pair","wallet","risk","entry","stop","tp","manualLot"].forEach(id=>{document.getElementById(id).addEventListener("input", calculate);});
+calculate();
+</script>
+
+<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js');}
+</script>
+</body>
+</html>
